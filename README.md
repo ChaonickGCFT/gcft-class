@@ -1,4 +1,5 @@
 [![GCFT build & verify](https://github.com/ChaonickGCFT/gcft-class/actions/workflows/ci.yml/badge.svg)](https://github.com/ChaonickGCFT/gcft-class/actions/workflows/ci.yml)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.16779271.svg)](https://doi.org/10.5281/zenodo.16779271)
 
 # GCFT Power Spectrum Simulation Release
 
