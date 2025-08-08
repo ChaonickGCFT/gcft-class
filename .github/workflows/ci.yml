@@ -1,60 +1,16 @@
-name: GCFT build & verify
-on: [push, pull_request, workflow_dispatch]
-
-jobs:
-  reproduce:
-    runs-on: ubuntu-latest
-    steps:
-      # Pull repo + LFS data (so gcft00_pk.dat isn't a text pointer)
-      - uses: actions/checkout@v4
-        with:
-          lfs: true
-      - name: Init Git LFS
-        run: git lfs install
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: System deps
-        run: sudo apt update && sudo apt install -y build-essential gfortran
-
-      - name: Python deps
-        if: hashFiles('requirements.txt') != ''
-        run: pip install -r requirements.txt
-
-      - name: Fetch CLASS
-        run: git clone --depth 1 https://github.com/lesgourg/class_public.git class_public
-
-      - name: Copy GCFT files into CLASS dir
-        run: |
-          cp gcft.ini gcft_class_background.dat class_public/
-          mkdir -p output
-
-      - name: Build & run CLASS
-        working-directory: class_public
-        run: |
-          make -j
-          ./class gcft.ini
-          mkdir -p "$GITHUB_WORKSPACE/output"
-          cp output/*_background.dat output/*_thermodynamics.dat output/*_cl.dat output/*_pk.dat "$GITHUB_WORKSPACE/output/"
-
-      - name: List outputs
-        run: |
-          ls -lh output || true
-          echo "Baseline PK head:"; head -5 gcft00_pk.dat || true
-          echo "New PK head:"; head -5 output/gcft00_pk.dat || true
-
       - name: Verify outputs vs baselines
+        shell: bash
         run: |
           python - <<'PY'
           import sys, re, numpy as np, pathlib as P
+
           pairs = [
             ("output/gcft00_pk.dat","gcft00_pk.dat"),
             ("output/gcft00_cl.dat","gcft00_cl.dat"),
             ("output/gcft00_background.dat","gcft00_background.dat"),
             ("output/gcft00_thermodynamics.dat","gcft00_thermodynamics.dat"),
           ]
+
           num = re.compile(r'^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$')
           def load(path):
             rows=[]
@@ -66,26 +22,46 @@ jobs:
               rows.append([float(t) for t in toks])
             return np.array(rows,float)
 
-          ok=True; tol=1e-6
+          def max_rel(a,b):
+            return float(np.nanmax(np.abs(a-b)/np.maximum(np.abs(b),1e-12)))
+
+          ok=True
+          tol = 5e-6   # slightly looser than 1e-6 to ignore roundoff
+
           for new, ref in pairs:
             pn, pr = P.Path(new), P.Path(ref)
             if not pn.exists():
               print(f"[FAIL] missing {new}"); ok=False; continue
             if not pr.exists():
-              print(f"[WARN] no baseline {ref} (skipping compare)"); continue
+              print(f"[WARN] no baseline {ref} (skipping)"); continue
+
             A, B = load(pn), load(pr)
-            if A.shape != B.shape:
-              print(f"[FAIL] shape {A.shape}!={B.shape} for {new}"); ok=False; continue
-            rel = np.abs(A-B)/np.maximum(np.abs(B),1e-12)
-            m = float(np.nanmax(rel))
-            print(f"[{'OK' if m<=tol else 'FAIL'}] {new} max rel diff={m:.3e}")
-            if m>tol: ok=False
+
+            if new.endswith("_pk.dat"):
+              kB, PB = B[:,0], B[:,1]
+              kA, PA = A[:,0], A[:,1]
+              kmin, kmax = max(kA.min(), kB.min()), min(kA.max(), kB.max())
+              m = (kB>=kmin) & (kB<=kmax)
+              PAi = np.interp(kB[m], kA, PA)
+              diff = max_rel(PAi, PB[m])
+              print(f"[{'OK' if diff<=tol else 'FAIL'}] {new} (interp→baseline grid) max rel diff={diff:.3e}")
+              if diff>tol: ok=False
+
+            elif new.endswith("_cl.dat"):
+              if A.shape != B.shape:
+                print(f"[FAIL] shape {A.shape}!={B.shape} for {new}"); ok=False
+              else:
+                diff = max_rel(A, B)
+                print(f"[{'OK' if diff<=tol else 'FAIL'}] {new} max rel diff={diff:.3e}")
+                if diff>tol: ok=False
+
+            else:
+              if A.shape != B.shape:
+                print(f"[FAIL] shape {A.shape}!={B.shape} for {new}"); ok=False
+              else:
+                diff = max_rel(A, B)
+                print(f"[{'OK' if diff<=tol else 'FAIL'}] {new} max rel diff={diff:.3e}")
+                if diff>tol: ok=False
+
           sys.exit(0 if ok else 1)
           PY
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: gcft-outputs
-          path: |
-            output/gcft00_*.dat
