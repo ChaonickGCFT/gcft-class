@@ -23,7 +23,6 @@ jobs:
       - name: Copy GCFT files into CLASS dir
         run: |
           cp gcft.ini gcft_class_background.dat class_public/
-          # keep outputs in repo root for easy diff
           mkdir -p output
 
       - name: Build & run CLASS
@@ -31,31 +30,38 @@ jobs:
         run: |
           make -j
           ./class gcft.ini
-          cp output/gcft00_*.dat "$GITHUB_WORKSPACE/output/"
+          mkdir -p "$GITHUB_WORKSPACE/output"
+          cp output/*_background.dat output/*_thermodynamics.dat output/*_cl.dat output/*_pk.dat "$GITHUB_WORKSPACE/output/"
 
       - name: Verify outputs vs baselines
         run: |
           python - <<'PY'
           import sys, re, numpy as np, pathlib as P
-          pairs=[("output/gcft00_pk.dat","GCFT00_pk.dat"),
-                 ("output/gcft00_cl.dat","gcft00_cl.dat"),
-                 ("output/gcft00_background.dat","gcft00_background.dat"),
-                 ("output/gcft00_thermodynamics.dat","gcft00_thermodynamics.dat")]
+          pairs = [
+            ("output/gcft00_pk.dat","gcft00_pk.dat"),
+            ("output/gcft00_cl.dat","gcft00_cl.dat"),
+            ("output/gcft00_background.dat","gcft00_background.dat"),
+            ("output/gcft00_thermodynamics.dat","gcft00_thermodynamics.dat"),
+          ]
           def load(p):
             rows=[]
             for ln in open(p,'r',errors='ignore'):
               if ln.lstrip().startswith('#') or not ln.strip(): continue
               rows.append([float(x) for x in re.split(r'\s+', ln.strip())])
             return np.array(rows,float)
+
           ok=True; tol=1e-6
-          for new,ref in pairs:
-            pn,pr=P.Path(new),P.Path(ref)
-            if not pn.exists(): print(f"[FAIL] missing {new}"); ok=False; continue
-            if not pr.exists(): print(f"[WARN] no baseline {ref}"); continue
-            A,B=load(pn),load(pr)
-            if A.shape!=B.shape: print(f"[FAIL] shape {A.shape}!={B.shape} for {new}"); ok=False; continue
-            rel=np.abs(A-B)/np.maximum(np.abs(B),1e-12)
-            m=float(np.nanmax(rel))
+          for new, ref in pairs:
+            pn, pr = P.Path(new), P.Path(ref)
+            if not pn.exists():
+              print(f"[FAIL] missing {new}"); ok=False; continue
+            if not pr.exists():
+              print(f"[WARN] no baseline {ref}"); continue
+            A, B = load(pn), load(pr)
+            if A.shape != B.shape:
+              print(f"[FAIL] shape {A.shape}!={B.shape} for {new}"); ok=False; continue
+            rel = np.abs(A-B)/np.maximum(np.abs(B),1e-12)
+            m = float(np.nanmax(rel))
             print(f"[{'OK' if m<=tol else 'FAIL'}] {new} max rel diff={m:.3e}")
             if m>tol: ok=False
           sys.exit(0 if ok else 1)
@@ -65,7 +71,6 @@ jobs:
         if: always()
         with:
           name: gcft-outputs
-          path: output/gcft00_*.dat
+          path: |
+            output/gcft00_*.dat
 
-          name: gcft-outputs
-          path: output/gcft00_*.dat
