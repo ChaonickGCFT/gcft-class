@@ -1,7 +1,59 @@
-      - name: Verify outputs vs baselines
-        shell: bash
+name: GCFT build & verify
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Init Git LFS (for any .dat tracked via LFS)
         run: |
-          python - <<'PY'
+          git lfs install
+          git lfs pull || true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: System deps
+        run: sudo apt-get update && sudo apt-get install -y build-essential gfortran
+
+      - name: Python deps
+        if: hashFiles('requirements.txt') != ''
+        run: pip install -r requirements.txt
+
+      - name: Fetch CLASS
+        run: git clone --depth 1 https://github.com/lesgourg/class_public.git class_public
+
+      - name: Copy GCFT files into CLASS dir
+        run: |
+          cp gcft.ini gcft_class_background.dat class_public/
+          mkdir -p output
+
+      - name: Build & run CLASS
+        working-directory: class_public
+        run: |
+          make -j"$(nproc)"
+          ./class gcft.ini
+          mkdir -p "$GITHUB_WORKSPACE/output"
+          cp output/*_background.dat output/*_thermodynamics.dat output/*_cl.dat output/*_pk.dat "$GITHUB_WORKSPACE/output/" || true
+
+      - name: List outputs
+        run: ls -lh output || true
+
+      # Write the verification script to a file so YAML doesn't complain
+      - name: Write verify script
+        run: |
+          cat > verify.py <<'PY'
           import sys, re, numpy as np, pathlib as P
 
           pairs = [
@@ -13,55 +65,71 @@
 
           num = re.compile(r'^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$')
           def load(path):
-            rows=[]
-            for ln in open(path,'r',errors='ignore'):
-              s=ln.strip()
-              if not s or s.startswith('#'): continue
-              toks=[t for t in re.split(r'\s+', s) if num.match(t)]
-              if not toks: continue
-              rows.append([float(t) for t in toks])
-            return np.array(rows,float)
+              rows=[]
+              for ln in open(path,'r',errors='ignore'):
+                  s=ln.strip()
+                  if not s or s.startswith('#'): 
+                      continue
+                  toks=[t for t in re.split(r'\s+', s) if num.match(t)]
+                  if not toks:
+                      continue
+                  rows.append([float(t) for t in toks])
+              return np.array(rows,float)
 
           def max_rel(a,b):
-            return float(np.nanmax(np.abs(a-b)/np.maximum(np.abs(b),1e-12)))
+              return float(np.nanmax(np.abs(a-b)/np.maximum(np.abs(b),1e-12)))
 
           ok=True
-          tol = 5e-6   # slightly looser than 1e-6 to ignore roundoff
+          tol = 5e-6   # allow tiny numerical wiggles
 
           for new, ref in pairs:
-            pn, pr = P.Path(new), P.Path(ref)
-            if not pn.exists():
-              print(f"[FAIL] missing {new}"); ok=False; continue
-            if not pr.exists():
-              print(f"[WARN] no baseline {ref} (skipping)"); continue
+              pn, pr = P.Path(new), P.Path(ref)
+              if not pn.exists():
+                  print(f"[FAIL] missing {new}"); ok=False; continue
+              if not pr.exists():
+                  print(f"[WARN] no baseline {ref} (skipping)"); continue
 
-            A, B = load(pn), load(pr)
+              A, B = load(pn), load(pr)
 
-            if new.endswith("_pk.dat"):
-              kB, PB = B[:,0], B[:,1]
-              kA, PA = A[:,0], A[:,1]
-              kmin, kmax = max(kA.min(), kB.min()), min(kA.max(), kB.max())
-              m = (kB>=kmin) & (kB<=kmax)
-              PAi = np.interp(kB[m], kA, PA)
-              diff = max_rel(PAi, PB[m])
-              print(f"[{'OK' if diff<=tol else 'FAIL'}] {new} (interp→baseline grid) max rel diff={diff:.3e}")
-              if diff>tol: ok=False
+              if new.endswith("_pk.dat"):
+                  # Compare on baseline k-grid
+                  kB, PB = B[:,0], B[:,1]
+                  kA, PA = A[:,0], A[:,1]
+                  kmin, kmax = max(kA.min(), kB.min()), min(kA.max(), kB.max())
+                  m = (kB>=kmin) & (kB<=kmax)
+                  if not np.any(m):
+                      print(f"[FAIL] no overlapping k-range for {new}"); ok=False; continue
+                  PAi = np.interp(kB[m], kA, PA)
+                  diff = max_rel(PAi, PB[m])
+                  print(f"[{'OK' if diff<=tol else 'FAIL'}] {new} (interp→baseline) max rel diff={diff:.3e}")
+                  if diff>tol: ok=False
 
-            elif new.endswith("_cl.dat"):
-              if A.shape != B.shape:
-                print(f"[FAIL] shape {A.shape}!={B.shape} for {new}"); ok=False
+              elif new.endswith("_cl.dat"):
+                  if A.shape != B.shape:
+                      print(f"[FAIL] shape {A.shape}!={B.shape} for {new}"); ok=False
+                  else:
+                      diff = max_rel(A, B)
+                      print(f"[{'OK' if diff<=tol else 'FAIL'}] {new} max rel diff={diff:.3e}")
+                      if diff>tol: ok=False
+
               else:
-                diff = max_rel(A, B)
-                print(f"[{'OK' if diff<=tol else 'FAIL'}] {new} max rel diff={diff:.3e}")
-                if diff>tol: ok=False
-
-            else:
-              if A.shape != B.shape:
-                print(f"[FAIL] shape {A.shape}!={B.shape} for {new}"); ok=False
-              else:
-                diff = max_rel(A, B)
-                print(f"[{'OK' if diff<=tol else 'FAIL'}] {new} max rel diff={diff:.3e}")
-                if diff>tol: ok=False
+                  if A.shape != B.shape:
+                      print(f"[FAIL] shape {A.shape}!={B.shape} for {new}"); ok=False
+                  else:
+                      diff = max_rel(A, B)
+                      print(f"[{'OK' if diff<=tol else 'FAIL'}] {new} max rel diff={diff:.3e}")
+                      if diff>tol: ok=False
 
           sys.exit(0 if ok else 1)
           PY
+
+      - name: Verify outputs vs baselines
+        run: python verify.py
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gcft-outputs
+          path: |
+            output/gcft00_*.dat
