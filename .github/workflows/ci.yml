@@ -5,10 +5,16 @@ jobs:
   reproduce:
     runs-on: ubuntu-latest
     steps:
+      # Pull repo + LFS data (so gcft00_pk.dat isn't a text pointer)
       - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - name: Init Git LFS
+        run: git lfs install
 
       - uses: actions/setup-python@v5
-        with: { python-version: '3.12' }
+        with:
+          python-version: '3.12'
 
       - name: System deps
         run: sudo apt update && sudo apt install -y build-essential gfortran
@@ -33,6 +39,12 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/output"
           cp output/*_background.dat output/*_thermodynamics.dat output/*_cl.dat output/*_pk.dat "$GITHUB_WORKSPACE/output/"
 
+      - name: List outputs
+        run: |
+          ls -lh output || true
+          echo "Baseline PK head:"; head -5 gcft00_pk.dat || true
+          echo "New PK head:"; head -5 output/gcft00_pk.dat || true
+
       - name: Verify outputs vs baselines
         run: |
           python - <<'PY'
@@ -43,11 +55,15 @@ jobs:
             ("output/gcft00_background.dat","gcft00_background.dat"),
             ("output/gcft00_thermodynamics.dat","gcft00_thermodynamics.dat"),
           ]
-          def load(p):
+          num = re.compile(r'^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$')
+          def load(path):
             rows=[]
-            for ln in open(p,'r',errors='ignore'):
-              if ln.lstrip().startswith('#') or not ln.strip(): continue
-              rows.append([float(x) for x in re.split(r'\s+', ln.strip())])
+            for ln in open(path,'r',errors='ignore'):
+              s=ln.strip()
+              if not s or s.startswith('#'): continue
+              toks=[t for t in re.split(r'\s+', s) if num.match(t)]
+              if not toks: continue
+              rows.append([float(t) for t in toks])
             return np.array(rows,float)
 
           ok=True; tol=1e-6
@@ -56,7 +72,7 @@ jobs:
             if not pn.exists():
               print(f"[FAIL] missing {new}"); ok=False; continue
             if not pr.exists():
-              print(f"[WARN] no baseline {ref}"); continue
+              print(f"[WARN] no baseline {ref} (skipping compare)"); continue
             A, B = load(pn), load(pr)
             if A.shape != B.shape:
               print(f"[FAIL] shape {A.shape}!={B.shape} for {new}"); ok=False; continue
@@ -73,4 +89,3 @@ jobs:
           name: gcft-outputs
           path: |
             output/gcft00_*.dat
-
