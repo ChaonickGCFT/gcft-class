@@ -1,3 +1,5 @@
+[![GCFT build & verify](https://github.com/ChaonickGCFT/gcft-class/actions/workflows/ci.yml/badge.svg)](https://github.com/ChaonickGCFT/gcft-class/actions/workflows/ci.yml)
+
 # GCFT Power Spectrum Simulation Release
 
 This package contains the data, figures, and manuscript for the paper:
