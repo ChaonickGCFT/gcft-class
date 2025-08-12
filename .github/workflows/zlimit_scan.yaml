@@ -31,14 +31,18 @@ jobs:
 
       - name: 🔧 Build CLASS
         working-directory: class_public
-        run: make -j"$(nproc)"
+        run: |
+          if ! make -j"$(nproc)"; then
+            echo "Build failed!"
+            exit 1
+          fi
 
       - name: 🚀 Run A (high-z mPk only)
         working-directory: class_public
         run: |
           cp "$GITHUB_WORKSPACE/gcft_class_background.dat" .
           cp "$GITHUB_WORKSPACE/gcft_zlimit_highz.ini" .
-          ./class gcft_zlimit_highz.ini
+          ./class gcft_zlimit_highz.ini || { echo 'CLASS failed during phase A'; exit 1; }
           mkdir -p "$GITHUB_WORKSPACE/output/highz"
           cp -v output/* "$GITHUB_WORKSPACE/output/highz/"
 
@@ -46,16 +50,31 @@ jobs:
         working-directory: class_public
         run: |
           cp "$GITHUB_WORKSPACE/gcft_zlimit_cmb.ini" .
-          ./class gcft_zlimit_cmb.ini
+          ./class gcft_zlimit_cmb.ini || { echo 'CLASS failed during phase B'; exit 1; }
           mkdir -p "$GITHUB_WORKSPACE/output/cmb"
           cp -v output/* "$GITHUB_WORKSPACE/output/cmb/"
 
       - name: 📂 List outputs
         run: ls -Rlh output || true
 
-      - name: 📤 Upload artifacts
+      - name: 📤 Upload High-z Artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gcft-zlimit-outputs
-          path: output/
+          name: gcft-highz-outputs
+          path: output/highz/
+
+      - name: 📤 Upload CMB Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gcft-cmb-outputs
+          path: output/cmb/
+
+      - name: 📤 Upload Combined Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gcft-outputs
+          path: $GITHUB_WORKSPACE/output/
+
