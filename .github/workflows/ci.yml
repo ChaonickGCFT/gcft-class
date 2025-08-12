@@ -34,10 +34,10 @@ jobs:
       - name: Fetch CLASS
         run: git clone --depth 1 https://github.com/lesgourg/class_public.git class_public
 
-      - name: Copy GCFT config and data
+     - name: Copy GCFT config and data
   run: |
     cp gcft.ini class_public/gcft.ini
-    cp gcft_class_background.dat class_public/gcft_class_background.dat
+    cp gcft_class_background.dat class_public/gcft00_background.dat
     mkdir -p output
 
       - name: Build & run CLASS
