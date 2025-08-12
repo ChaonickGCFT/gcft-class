@@ -54,64 +54,65 @@ jobs:
       - name: Write verify script
         run: |
           cat > verify.py <<'PY'
-          import sys, re, numpy as np, pathlib as P
+import sys, re, numpy as np, pathlib as P
 
-          pairs = [
-            ("output/gcft00_pk.dat","gcft00_pk.dat"),
-            ("output/gcft00_cl.dat","gcft00_cl.dat"),
-            ("output/gcft00_background.dat","gcft00_background.dat"),
-            ("output/gcft00_thermodynamics.dat","gcft00_thermodynamics.dat"),
-          ]
+pairs = [
+  ("output/gcft01_pk.dat", "gcft00_pk.dat"),
+  ("output/gcft01_cl.dat", "gcft00_cl.dat"),
+  ("output/gcft01_background.dat", "gcft00_background.dat"),
+  ("output/gcft01_thermodynamics.dat", "gcft00_thermodynamics.dat"),
+]
 
-          num = re.compile(r'^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$')
-          def load(path):
-              rows=[]
-              for ln in open(path,'r',errors='ignore'):
-                  s=ln.strip()
-                  if not s or s.startswith('#'): 
-                      continue
-                  toks=[t for t in re.split(r'\s+', s) if num.match(t)]
-                  if not toks:
-                      continue
-                  rows.append([float(t) for t in toks])
-              return np.array(rows,float)
+num = re.compile(r'^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$')
 
-          def max_rel(a,b):
-              return float(np.nanmax(np.abs(a-b)/np.maximum(np.abs(b),1e-12)))
+def load(path):
+    rows = []
+    for ln in open(path, 'r', errors='ignore'):
+        s = ln.strip()
+        if not s or s.startswith('#'):
+            continue
+        toks = [t for t in re.split(r'\s+', s) if num.match(t)]
+        if not toks:
+            continue
+        rows.append([float(t) for t in toks])
+    return np.array(rows, float)
 
-          ok=True
-          tol = 5e-6
+def max_rel(a, b):
+    return float(np.nanmax(np.abs(a - b) / np.maximum(np.abs(b), 1e-12)))
 
-          for new, ref in pairs:
-              pn, pr = P.Path(new), P.Path(ref)
-              if not pn.exists():
-                  print(f"[FAIL] missing {new}"); ok=False; continue
-              if not pr.exists():
-                  print(f"[WARN] no baseline {ref} (skipping)"); continue
+ok = True
+tol = 5e-6
 
-              A, B = load(pn), load(pr)
+for new, ref in pairs:
+    pn, pr = P.Path(new), P.Path(ref)
+    if not pn.exists():
+        print(f"[FAIL] missing {new}"); ok = False; continue
+    if not pr.exists():
+        print(f"[WARN] no baseline {ref} (skipping)"); continue
 
-              if new.endswith("_pk.dat"):
-                  kB, PB = B[:,0], B[:,1]
-                  kA, PA = A[:,0], A[:,1]
-                  kmin, kmax = max(kA.min(), kB.min()), min(kA.max(), kB.max())
-                  m = (kB>=kmin) & (kB<=kmax)
-                  if not np.any(m):
-                      print(f"[FAIL] no overlapping k-range for {new}"); ok=False; continue
-                  PAi = np.interp(kB[m], kA, PA)
-                  diff = max_rel(PAi, PB[m])
-                  print(f"[{'OK' if diff<=tol else 'FAIL'}] {new} (interp→baseline) max rel diff={diff:.3e}")
-                  if diff>tol: ok=False
+    A, B = load(pn), load(pr)
 
-              elif new.endswith("_cl.dat") or True:
-                  if A.shape != B.shape:
-                      print(f"[FAIL] shape {A.shape}!={B.shape} for {new}"); ok=False
-                  else:
-                      diff = max_rel(A, B)
-                      print(f"[{'OK' if diff<=tol else 'FAIL'}] {new} max rel diff={diff:.3e}")
-                      if diff>tol: ok=False
+    if new.endswith("_pk.dat"):
+        kB, PB = B[:, 0], B[:, 1]
+        kA, PA = A[:, 0], A[:, 1]
+        kmin, kmax = max(kA.min(), kB.min()), min(kA.max(), kB.max())
+        m = (kB >= kmin) & (kB <= kmax)
+        if not np.any(m):
+            print(f"[FAIL] no overlapping k-range for {new}"); ok = False; continue
+        PAi = np.interp(kB[m], kA, PA)
+        diff = max_rel(PAi, PB[m])
+        print(f"[{'OK' if diff <= tol else 'FAIL'}] {new} (interp→baseline) max rel diff={diff:.3e}")
+        if diff > tol: ok = False
 
-          sys.exit(0 if ok else 1)
+    else:
+        if A.shape != B.shape:
+            print(f"[FAIL] shape {A.shape} != {B.shape} for {new}"); ok = False
+        else:
+            diff = max_rel(A, B)
+            print(f"[{'OK' if diff <= tol else 'FAIL'}] {new} max rel diff={diff:.3e}")
+            if diff > tol: ok = False
+
+sys.exit(0 if ok else 1)
           PY
 
       - name: Verify outputs vs baselines
@@ -123,4 +124,4 @@ jobs:
         with:
           name: gcft-outputs
           path: |
-            output/gcft00_*.dat
+            output/gcft01_*.dat
