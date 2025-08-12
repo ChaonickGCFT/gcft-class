@@ -1,0 +1,48 @@
+name: GCFT A→B z-scan
+
+on:
+  workflow_dispatch:      # run by hand from Actions tab
+  push:
+    paths:
+      - .github/workflows/reproduce.yml
+      - reproduce.sh
+      - gcft_class_background.dat
+
+jobs:
+  run-a-then-b:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 📥 Checkout repo
+        uses: actions/checkout@v4
+
+      - name: 🛠️ System deps
+        run: sudo apt-get update && sudo apt-get install -y build-essential gfortran
+
+      - name: 🔄 Fetch CLASS
+        run: git clone --depth 1 https://github.com/lesgourg/class_public.git class_public
+
+      - name: ⚙️ Copy background + script
+        run: |
+          cp gcft_class_background.dat class_public/
+          cp reproduce.sh class_public/
+          chmod +x class_public/reproduce.sh
+
+      - name: 🚀 Run A→B (auto-probe high-z then CMB)
+        working-directory: class_public
+        run: ./reproduce.sh
+
+      - name: 📂 List artifacts
+        run: |
+          ls -lh class_public/results || true
+          ls -lh class_public/logs || true
+
+      - name: 📤 Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gcft-a-then-b-results
+          path: |
+            class_public/results/**
+            class_public/logs/**
