@@ -9,23 +9,32 @@ MAKE_J=$(command -v nproc >/dev/null 2>&1 && nproc || echo 2)
 # Candidates for the high-z probe (highest first)
 ZCAND=("2000" "1500" "1200" "1100" "1000" "800" "600" "400" "300" "200" "100" "50" "25" "10")
 
-echo "==> Compiling CLASS…"
+# Logging function
+log() {
+  echo "$(date +"%Y-%m-%d %H:%M:%S") - $1"
+}
+
+log "==> Compiling CLASS…"
 make -j"${MAKE_J}"
 
+# Check if CLASS binary exists and is executable
 if [[ ! -x "$CLASS_BIN" ]]; then
-  echo "ERROR: $CLASS_BIN not found/exec."
-  exit 1
-fi
-if [[ ! -f "$BG_FILE" ]]; then
-  echo "ERROR: Background table '$BG_FILE' not found."
+  log "ERROR: $CLASS_BIN not found/exec."
   exit 1
 fi
 
+# Check if background file exists
+if [[ ! -f "$BG_FILE" ]]; then
+  log "ERROR: Background table '$BG_FILE' not found."
+  exit 1
+fi
+
+# Create necessary directories and clean output
 mkdir -p results logs
 rm -f output/* 2>/dev/null || true
 
 # ---------- A) High-z mPk only (auto-probe z) ----------
-echo "==> Phase A: high-z mPk (no CMB), probing for highest stable z_pk…"
+log "==> Phase A: high-z mPk (no CMB), probing for highest stable z_pk…"
 
 # Template (Z_HI will be substituted)
 read -r -d '' INI_A_TPL <<'INI'
@@ -56,23 +65,29 @@ background_verbose = 1
 INI
 
 FOUND_Z=""
+# Parallelizing the z_pk testing
+log "==> Starting parallel z_pk probing…"
 for Z in "${ZCAND[@]}"; do
-  INI_A=$(echo "$INI_A_TPL" | sed -e "s/Z_HI/$Z/g" -e "s|__BG__|$BG_FILE|g")
-  echo "$INI_A" > gcft_zlimit_highz.ini
+  (
+    INI_A=$(echo "$INI_A_TPL" | sed -e "s/Z_HI/$Z/g" -e "s|__BG__|$BG_FILE|g")
+    echo "$INI_A" > gcft_zlimit_highz_${Z}.ini
 
-  echo " -> trying z_pk=$Z …"
-  if "$CLASS_BIN" gcft_zlimit_highz.ini >"logs/highz_${Z}.log" 2>&1; then
-    FOUND_Z="$Z"
-    echo "    ✓ success at z_pk=$FOUND_Z"
-    break
-  else
-    echo "    ✗ failed at z_pk=$Z (see logs/highz_${Z}.log). Trying lower…"
-    rm -f output/* 2>/dev/null || true
-  fi
+    log " -> trying z_pk=$Z …"
+    if "$CLASS_BIN" gcft_zlimit_highz_${Z}.ini >"logs/highz_${Z}.log" 2>&1; then
+      FOUND_Z="$Z"
+      log "    ✓ success at z_pk=$FOUND_Z"
+    else
+      log "    ✗ failed at z_pk=$Z (see logs/highz_${Z}.log). Trying lower…"
+      rm -f output/* 2>/dev/null || true
+    fi
+  ) &
 done
 
+# Wait for all background jobs to finish
+wait
+
 if [[ -z "$FOUND_Z" ]]; then
-  echo "ERROR: All candidate redshifts failed in Phase A."
+  log "ERROR: All candidate redshifts failed in Phase A."
   exit 1
 fi
 
@@ -84,7 +99,7 @@ done
 rm -f output/* 2>/dev/null || true
 
 # ---------- B) CMB only ----------
-echo "==> Phase B: CMB only (no mPk)…"
+log "==> Phase B: CMB only (no mPk)…"
 
 cat > gcft_zlimit_cmb.ini <<EOF
 output = tCl, lCl, pCl
@@ -121,8 +136,7 @@ for f in output/*; do
   cp "$f" "results/cmb_$b"
 done
 
-echo
-echo "==> Done."
-echo "   Phase A highest stable z_pk: $FOUND_Z"
-echo "   Results saved under: $(pwd)/results"
-echo "   Logs in: $(pwd)/logs"
+log "==> Done."
+log "   Phase A highest stable z_pk: $FOUND_Z"
+log "   Results saved under: $(pwd)/results"
+log "   Logs in: $(pwd)/logs"
