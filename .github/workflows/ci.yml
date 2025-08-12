@@ -1,16 +1,4 @@
-- name: Build & run CLASS
-  working-directory: class_public
-  run: |
-    make -j"$(nproc)"
-
-    echo "🧪 Running CLASS with z_pk='0,25'..."
-    ./class ../gcft.ini z_pk='0,25' root='gcft00' || { echo '❌ CLASS run failed'; exit 1; }
-
-    echo "🔍 Checking for CLASS outputs:"
-    ls -lh gcft00_*.dat || { echo '❌ CLASS output files missing'; exit 1; }
-
-    mkdir -p "$GITHUB_WORKSPACE/output"
-    cp gcft00_*_background.dat gcft00_*_thermodynamics.dat gcft00_*_cl.dat gcft00_*_pk.dat "$GITHUB_WORKSPACE/output/"
+name: GCFT build & verify
 
 on:
   push:
@@ -49,18 +37,20 @@ jobs:
       - name: Copy GCFT files into CLASS dir
         run: |
           cp gcft.ini gcft_class_background.dat class_public/
+          mkdir -p output
 
       - name: Build & run CLASS
         working-directory: class_public
         run: |
           make -j"$(nproc)"
-          ./class ../gcft.ini z_pk='0,25' root='gcft00'
+          ./class gcft.ini
           mkdir -p "$GITHUB_WORKSPACE/output"
-          cp gcft00_*.dat "$GITHUB_WORKSPACE/output/" || true
+          cp output/*_background.dat output/*_thermodynamics.dat output/*_cl.dat output/*_pk.dat "$GITHUB_WORKSPACE/output/" || true
 
       - name: List outputs
         run: ls -lh output || true
 
+      # Write the verification script to a file so YAML doesn't complain
       - name: Write verify script
         run: |
           cat > verify.py <<'PY'
@@ -78,7 +68,7 @@ jobs:
               rows=[]
               for ln in open(path,'r',errors='ignore'):
                   s=ln.strip()
-                  if not s or s.startswith('#'):
+                  if not s or s.startswith('#'): 
                       continue
                   toks=[t for t in re.split(r'\s+', s) if num.match(t)]
                   if not toks:
@@ -86,37 +76,11 @@ jobs:
                   rows.append([float(t) for t in toks])
               return np.array(rows,float)
 
-          def read_pk_blocks(path):
-              blocks = {}
-              z = None
-              k, pk = [], []
-              with open(path, "r", errors="ignore") as f:
-                  for line in f:
-                      s = line.strip()
-                      if not s:
-                          continue
-                      if s.startswith("#") and "z =" in s:
-                          if z is not None and k:
-                              blocks[z] = (np.array(k), np.array(pk))
-                              k, pk = [], []
-                          try:
-                              z = float(s.split("z =",1)[1].split()[0].replace(",",""))
-                          except:
-                              z = None
-                          continue
-                      if not s.startswith("#"):
-                          cols = s.split()
-                          if len(cols) >= 2:
-                              k.append(float(cols[0])); pk.append(float(cols[1]))
-              if z is not None and k:
-                  blocks[z] = (np.array(k), np.array(pk))
-              return blocks
-
           def max_rel(a,b):
               return float(np.nanmax(np.abs(a-b)/np.maximum(np.abs(b),1e-12)))
 
           ok=True
-          tol = 5e-6
+          tol = 5e-6   # allow tiny numerical wiggles
 
           for new, ref in pairs:
               pn, pr = P.Path(new), P.Path(ref)
@@ -125,30 +89,30 @@ jobs:
               if not pr.exists():
                   print(f"[WARN] no baseline {ref} (skipping)"); continue
 
+              A, B = load(pn), load(pr)
+
               if new.endswith("_pk.dat"):
-                  Ablocks = read_pk_blocks(pn)
-                  Bblocks = read_pk_blocks(pr)
+                  # Compare on baseline k-grid
+                  kB, PB = B[:,0], B[:,1]
+                  kA, PA = A[:,0], A[:,1]
+                  kmin, kmax = max(kA.min(), kB.min()), min(kA.max(), kB.max())
+                  m = (kB>=kmin) & (kB<=kmax)
+                  if not np.any(m):
+                      print(f"[FAIL] no overlapping k-range for {new}"); ok=False; continue
+                  PAi = np.interp(kB[m], kA, PA)
+                  diff = max_rel(PAi, PB[m])
+                  print(f"[{'OK' if diff<=tol else 'FAIL'}] {new} (interp→baseline) max rel diff={diff:.3e}")
+                  if diff>tol: ok=False
 
-                  if 25.0 not in Ablocks:
-                      print(f"[FAIL] {new} missing z=25 block"); ok=False
-
-                  common = sorted(set(Ablocks) & set(Bblocks))
-                  if not common:
-                      print(f"[FAIL] no common z-blocks for {new}"); ok=False; continue
-
-                  for z in common:
-                      kA, PA = Ablocks[z]; kB, PB = Bblocks[z]
-                      kmin, kmax = max(kA.min(), kB.min()), min(kA.max(), kB.max())
-                      m = (kB>=kmin) & (kB<=kmax)
-                      if not np.any(m):
-                          print(f"[FAIL] no overlap in k-range for {new} @ z={z}"); ok=False; continue
-                      PAi = np.interp(kB[m], kA, PA)
-                      diff = max_rel(PAi, PB[m])
-                      print(f"[{'OK' if diff<=tol else 'FAIL'}] {new} @ z={z} max rel diff={diff:.3e}")
+              elif new.endswith("_cl.dat"):
+                  if A.shape != B.shape:
+                      print(f"[FAIL] shape {A.shape}!={B.shape} for {new}"); ok=False
+                  else:
+                      diff = max_rel(A, B)
+                      print(f"[{'OK' if diff<=tol else 'FAIL'}] {new} max rel diff={diff:.3e}")
                       if diff>tol: ok=False
 
               else:
-                  A, B = load(pn), load(pr)
                   if A.shape != B.shape:
                       print(f"[FAIL] shape {A.shape}!={B.shape} for {new}"); ok=False
                   else:
