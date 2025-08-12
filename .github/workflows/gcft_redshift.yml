@@ -5,42 +5,109 @@ on:
   push:
     paths:
       - gcft_redshift_lim.ini
+      - verify_z.py
+      - .github/workflows/gcft_redshift.yml
 
 jobs:
   redshift-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      OMP_NUM_THREADS: 1
 
     steps:
-      - name: Checkout repo
+      - name: 📥 Checkout this repo
         uses: actions/checkout@v4
 
-      - name: Setup Python & deps
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install system deps
+      - name: 📦 Python deps (numpy for verifier)
+        run: python -m pip install --upgrade pip numpy
+
+      - name: 🛠️ System deps
         run: sudo apt-get update && sudo apt-get install -y build-essential gfortran
 
-      - name: Fetch CLASS
+      - name: 🔄 Fetch CLASS
         run: git clone --depth 1 https://github.com/lesgourg/class_public.git class_public
 
-      - name: Copy GCFT config
+      - name: ⚙️ Copy GCFT config + background
         run: |
           cp gcft_redshift_lim.ini class_public/gcft_redshift_lim.ini
           cp gcft_class_background.dat class_public/gcft_class_background.dat
           mkdir -p output
 
-      - name: Build & run CLASS (z-scan)
+      - name: 🚀 Build & run CLASS
         working-directory: class_public
         run: |
           make -j"$(nproc)"
           ./class gcft_redshift_lim.ini
           mkdir -p "$GITHUB_WORKSPACE/output"
-          cp output/* "$GITHUB_WORKSPACE/output/"
+          # rename outputs to gcft_zscan_*
+          for file in output/*.dat; do
+            name=$(basename "$file")
+            cp "$file" "$GITHUB_WORKSPACE/output/${name/gcft_redshift_lim/gcft_zscan}"
+          done
 
-      - name: Upload results
+      - name: 📂 List outputs
+        run: ls -lh output || true
+
+      # ===== Baselines pulled from your first repo =====
+      - name: 📥 Checkout baseline repo (first repo)
+        uses: actions/checkout@v4
+        with:
+          repository: ChaonickGCFT/gcft-class   # <-- change if your "first repo" name differs
+          ref: main
+          path: baseline_repo
+
+      - name: 🧱 Prepare baselines from first repo
+        run: |
+          mkdir -p baselines
+          # Combined baseline if present
+          if [ -f baseline_repo/output/gcft00_pk.dat ]; then
+            cp baseline_repo/output/gcft00_pk.dat gcft00_pk.dat
+          fi
+          # Per-z baselines if present
+          ls baseline_repo/output/gcft00_pk_z*.dat >/dev/null 2>&1 && \
+            cp baseline_repo/output/gcft00_pk_z*.dat baselines/ || true
+          # If only combined exists, split into per-z
+          if [ ! -e baselines/gcft00_pk_z0000.dat ] && [ -f gcft00_pk.dat ]; then
+            python - <<'PY'
+import re, pathlib as P, numpy as np
+src = P.Path("gcft00_pk.dat")
+out = P.Path("baselines"); out.mkdir(exist_ok=True)
+z=None; cur=[]
+for ln in src.read_text().splitlines():
+    s=ln.strip()
+    if not s: continue
+    if s.startswith('#') and 'z =' in s:
+        if z is not None and cur:
+            arr=np.array([list(map(float,l.split())) for l in cur if l.strip() and not l.startswith('#')])
+            out.joinpath(f"gcft00_pk_z{int(z):04d}.dat").write_text(
+                "\n".join(" ".join(map("{:.8e}".format,r)) for r in arr)+"\n")
+        z=float(re.findall(r'z\s*=\s*([0-9.]+)',s)[0]); cur=[]
+    elif not s.startswith('#'):
+        cur.append(s)
+if z is not None and cur:
+    arr=np.array([list(map(float,l.split())) for l in cur if l.strip() and not l.startswith('#')])
+    out.joinpath(f"gcft00_pk_z{int(z):04d}.dat").write_text(
+        "\n".join(" ".join(map("{:.8e}".format,r)) for r in arr)+"\n")
+print("Baselines written to", out)
+PY
+          fi
+          echo "== Baselines =="
+          ls -lh baselines || true
+          [ -f gcft00_pk.dat ] && ls -lh gcft00_pk.dat || true
+
+      # ===== Verify =====
+      - name: 🧪 Verify z-scan vs baselines
+        run: |
+          python -V
+          python verify_z.py
+
+      - name: 📤 Upload outputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
