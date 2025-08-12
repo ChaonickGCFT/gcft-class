@@ -1,0 +1,17 @@
+- name: 🚀 Run A (low-z mPk)
+  working-directory: class_public
+  run: |
+    cp "$GITHUB_WORKSPACE/gcft_class_background.dat" .
+    cp "$GITHUB_WORKSPACE/gcft_zlimit_highz.ini" .
+    ./class gcft_zlimit_highz.ini
+    mkdir -p "$GITHUB_WORKSPACE/output/lowz"
+    cp -v output/* "$GITHUB_WORKSPACE/output/lowz/"
+
+- name: 🚀 Run B (high-z tCl)
+  working-directory: class_public
+  run: |
+    cp "$GITHUB_WORKSPACE/gcft_class_background.dat" .
+    cp "$GITHUB_WORKSPACE/gcft_zlimit_highz.ini" .
+    ./class gcft_zlimit_highz.ini
+    mkdir -p "$GITHUB_WORKSPACE/output/highz"
+    cp -v output/* "$GITHUB_WORKSPACE/output/highz/"
