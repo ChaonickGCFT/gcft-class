@@ -8,7 +8,8 @@ CLASS_BIN=./class
 MAKE_J=$(command -v nproc >/dev/null 2>&1 && nproc || echo 2)
 
 # Candidates for the high-z probe (highest first)
-ZCAND=("2000" "1500" "1200" "1100" "1000" "800" "600" "400" "300" "200" "100" "50" "25" "10")
+ZCAND_HIGHZ=("2000" "1500" "1200" "1100" "1000" "800" "600" "400" "300" "200" "100" "50" "25" "10")
+ZCAND_LOWZ=("0" "25" "100" "200" "500" "1000")  # Adjust lower redshift range for mPk
 
 # Logging function
 log() {
@@ -67,8 +68,8 @@ INI
 
 FOUND_Z=""
 # Disable parallel execution for debugging
-log "==> Starting z_pk probing…"
-for Z in "${ZCAND[@]}"; do
+log "==> Starting high-z z_pk probing…"
+for Z in "${ZCAND_HIGHZ[@]}"; do
   INI_A=$(echo "$INI_A_TPL" | sed -e "s/Z_HI/$Z/g" -e "s|__BG__|$BG_FILE|g")
   echo "$INI_A" > gcft_zlimit_highz_${Z}.ini
 
@@ -86,7 +87,7 @@ done
 # If no valid z_pk found, log and exit
 if [[ -z "$FOUND_Z" ]]; then
   log "ERROR: All candidate redshifts failed in Phase A."
-  for Z in "${ZCAND[@]}"; do
+  for Z in "${ZCAND_HIGHZ[@]}"; do
     if [[ ! -f "logs/highz_${Z}.log" ]]; then
       log "No log found for z_pk=$Z"
     fi
@@ -101,18 +102,19 @@ for f in output/*; do
 done
 rm -f output/* 2>/dev/null || true
 
-# ---------- B) CMB only ----------
-log "==> Phase B: CMB only (no mPk)…"
+# ---------- B) Low-z mPk only (auto-probe z) ----------
+log "==> Phase B: low-z mPk (no CMB), probing for z_pk…"
 
-cat > gcft_zlimit_cmb.ini <<EOF
-output = tCl, lCl, pCl
-l_max_scalars = 2500
-P_k_max_h/Mpc = 5
-# harmless z list when no mPk is requested
-z_pk = 0, 1, 2
+# Template for low-z (mPk)
+read -r -d '' INI_B_TPL <<'INI'
+output = mPk
+l_max_scalars = 1
+P_k_max_h/Mpc = 10
+z_pk = Z_LOWZ
+matter_source_in_current_gauge = yes
 
 use_tabulated_background = yes
-background_filename = $BG_FILE
+background_filename = __BG__
 
 k_pivot = 0.05
 P_k_ini type = analytic_Pk
@@ -125,20 +127,34 @@ tau_reio = 0.054
 
 write background = yes
 write thermodynamics = yes
-write cl = yes
+write pk = yes
 
 perturbations_verbose = 1
 background_verbose = 1
-EOF
+INI
 
-"$CLASS_BIN" gcft_zlimit_cmb.ini >"logs/cmb.log" 2>&1
+log "==> Starting low-z z_pk probing…"
+for Z in "${ZCAND_LOWZ[@]}"; do
+  INI_B=$(echo "$INI_B_TPL" | sed -e "s/Z_LOWZ/$Z/g" -e "s|__BG__|$BG_FILE|g")
+  echo "$INI_B" > gcft_zlimit_lowz_${Z}.ini
+
+  log " -> trying z_pk=$Z …"
+  if "$CLASS_BIN" gcft_zlimit_lowz_${Z}.ini >"logs/lowz_${Z}.log" 2>&1; then
+    log "    ✓ success at z_pk=$Z"
+  else
+    log "    ✗ failed at z_pk=$Z (see logs/lowz_${Z}.log). Trying lower…"
+    rm -f output/* 2>/dev/null || true
+  fi
+done
 
 # stash B outputs
 for f in output/*; do
   b=$(basename "$f")
-  cp "$f" "results/cmb_$b"
+  cp "$f" "results/lowz_z${FOUND_Z}_$b"
 done
+rm -f output/* 2>/dev/null || true
 
+# Finalize
 log "==> Done."
 log "   Phase A highest stable z_pk: $FOUND_Z"
 log "   Results saved under: $(pwd)/results"
