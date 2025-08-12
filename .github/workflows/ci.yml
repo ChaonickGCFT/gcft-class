@@ -37,15 +37,14 @@ jobs:
       - name: Copy GCFT files into CLASS dir
         run: |
           cp gcft.ini gcft_class_background.dat class_public/
-          mkdir -p output
 
       - name: Build & run CLASS
         working-directory: class_public
         run: |
           make -j"$(nproc)"
-          ./class gcft.ini z_pk='0,25' root='output/gcft00'
+          ./class ../gcft.ini z_pk='0,25' root='gcft00'
           mkdir -p "$GITHUB_WORKSPACE/output"
-          cp output/*_background.dat output/*_thermodynamics.dat output/*_cl.dat output/*_pk.dat "$GITHUB_WORKSPACE/output/" || true
+          cp gcft00_*.dat "$GITHUB_WORKSPACE/output/" || true
 
       - name: List outputs
         run: ls -lh output || true
