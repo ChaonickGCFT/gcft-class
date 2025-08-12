@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+set -x  # Enable debugging output
 
 # --- config ---
 BG_FILE=${BG_FILE:-gcft_class_background.dat}   # must exist next to this script
@@ -65,29 +66,31 @@ background_verbose = 1
 INI
 
 FOUND_Z=""
-# Parallelizing the z_pk testing
-log "==> Starting parallel z_pk probing…"
+# Disable parallel execution for debugging
+log "==> Starting z_pk probing…"
 for Z in "${ZCAND[@]}"; do
-  (
-    INI_A=$(echo "$INI_A_TPL" | sed -e "s/Z_HI/$Z/g" -e "s|__BG__|$BG_FILE|g")
-    echo "$INI_A" > gcft_zlimit_highz_${Z}.ini
+  INI_A=$(echo "$INI_A_TPL" | sed -e "s/Z_HI/$Z/g" -e "s|__BG__|$BG_FILE|g")
+  echo "$INI_A" > gcft_zlimit_highz_${Z}.ini
 
-    log " -> trying z_pk=$Z …"
-    if "$CLASS_BIN" gcft_zlimit_highz_${Z}.ini >"logs/highz_${Z}.log" 2>&1; then
-      FOUND_Z="$Z"
-      log "    ✓ success at z_pk=$FOUND_Z"
-    else
-      log "    ✗ failed at z_pk=$Z (see logs/highz_${Z}.log). Trying lower…"
-      rm -f output/* 2>/dev/null || true
-    fi
-  ) &
+  log " -> trying z_pk=$Z …"
+  if "$CLASS_BIN" gcft_zlimit_highz_${Z}.ini >"logs/highz_${Z}.log" 2>&1; then
+    FOUND_Z="$Z"
+    log "    ✓ success at z_pk=$FOUND_Z"
+    break
+  else
+    log "    ✗ failed at z_pk=$Z (see logs/highz_${Z}.log). Trying lower…"
+    rm -f output/* 2>/dev/null || true
+  fi
 done
 
-# Wait for all background jobs to finish
-wait
-
+# If no valid z_pk found, log and exit
 if [[ -z "$FOUND_Z" ]]; then
   log "ERROR: All candidate redshifts failed in Phase A."
+  for Z in "${ZCAND[@]}"; do
+    if [[ ! -f "logs/highz_${Z}.log" ]]; then
+      log "No log found for z_pk=$Z"
+    fi
+  done
   exit 1
 fi
 
