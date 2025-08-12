@@ -51,8 +51,10 @@ jobs:
             cp "$file" "$GITHUB_WORKSPACE/output/${name/gcft_redshift_lim/gcft_zscan}"
           done
 
-      - name: 📂 List outputs
-        run: ls -lh output || true
+      - name: 📂 Verify outputs before upload
+        run: |
+          echo "Verifying output files..."
+          ls -lh $GITHUB_WORKSPACE/output || true
 
       # ===== Baselines pulled from your first repo =====
       - name: 📥 Checkout baseline repo (first repo)
@@ -97,7 +99,7 @@ if z is not None and cur:
 print("Baselines written to", out)
 PY
           fi
-          echo "== Baselines =="
+          echo "== Baselines ==" 
           ls -lh baselines || true
           [ -f gcft00_pk.dat ] && ls -lh gcft00_pk.dat || true
 
@@ -112,4 +114,4 @@ PY
         uses: actions/upload-artifact@v4
         with:
           name: gcft-zscan-outputs
-          path: output/
+          path: $GITHUB_WORKSPACE/output/
