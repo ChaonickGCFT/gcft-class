@@ -1,0 +1,75 @@
+name: GCFT Redshift Scan Workflow
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - low-z-mpk
+      - high-z-tcl
+    paths:
+      - gcft_zlimit_lowz.ini
+      - gcft_zlimit_highz.ini
+      - gcft_class_background.dat
+
+jobs:
+  low-z-mpk:
+    if: github.ref == 'refs/heads/low-z-mpk'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: 📥 Checkout repo
+        uses: actions/checkout@v4
+
+      - name: 🔧 Build CLASS for low-z scan
+        working-directory: class_public
+        run: |
+          make -j"$(nproc)"
+
+      - name: 🚀 Run low-z mPk scan
+        working-directory: class_public
+        run: |
+          cp "$GITHUB_WORKSPACE/gcft_class_background.dat" .
+          cp "$GITHUB_WORKSPACE/gcft_zlimit_lowz.ini" .
+          ./class gcft_zlimit_lowz.ini
+          mkdir -p "$GITHUB_WORKSPACE/output/lowz"
+          cp -v output/* "$GITHUB_WORKSPACE/output/lowz/"
+
+      - name: 📂 List outputs
+        run: ls -Rlh output || true
+
+      - name: 📤 Upload low-z artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gcft-lowz-outputs
+          path: output/lowz/
+
+  high-z-tcl:
+    if: github.ref == 'refs/heads/high-z-tcl'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: 📥 Checkout repo
+        uses: actions/checkout@v4
+
+      - name: 🔧 Build CLASS for high-z scan
+        working-directory: class_public
+        run: |
+          make -j"$(nproc)"
+
+      - name: 🚀 Run high-z tCl scan
+        working-directory: class_public
+        run: |
+          cp "$GITHUB_WORKSPACE/gcft_class_background.dat" .
+          cp "$GITHUB_WORKSPACE/gcft_zlimit_highz.ini" .
+          ./class gcft_zlimit_highz.ini
+          mkdir -p "$GITHUB_WORKSPACE/output/highz"
+          cp -v output/* "$GITHUB_WORKSPACE/output/highz/"
+
+      - name: 📂 List outputs
+        run: ls -Rlh output || true
+
+      - name: 📤 Upload high-z artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gcft-highz-outputs
+          path: output/highz/
