@@ -1,0 +1,48 @@
+name: GCFT high-z power spectrum scan
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - gcft_redshift_lim.ini
+
+jobs:
+  redshift-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python & deps
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y build-essential gfortran
+
+      - name: Fetch CLASS
+        run: git clone --depth 1 https://github.com/lesgourg/class_public.git class_public
+
+      - name: Copy GCFT config
+        run: |
+          cp gcft_redshift_lim.ini class_public/gcft_redshift_lim.ini
+          cp gcft_class_background.dat class_public/gcft_class_background.dat
+          mkdir -p output
+
+      - name: Build & run CLASS (z-scan)
+        working-directory: class_public
+        run: |
+          make -j"$(nproc)"
+          ./class gcft_redshift_lim.ini
+          mkdir -p "$GITHUB_WORKSPACE/output"
+          cp output/* "$GITHUB_WORKSPACE/output/"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gcft-zscan-outputs
+          path: output/
