@@ -1,0 +1,77 @@
+name: GCFT Redshift Scan Workflow
+
+on:
+  workflow_dispatch:  # Allows manual triggering of the workflow from GitHub UI
+  push:
+    paths:
+      - gcft_redshift_lim.ini
+      - verify_z.py
+      - .github/workflows/gcft_redshift.yml
+
+jobs:
+  run-redshift-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OMP_NUM_THREADS: 1
+
+    steps:
+      # Checkout the repository
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      # Setup Python (necessary if you're running Python scripts)
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Install dependencies like numpy for the verification script
+      - name: 📦 Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy
+
+      # Install system dependencies like build tools and gfortran
+      - name: 🛠️ Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential gfortran
+
+      # Fetch and compile the CLASS code
+      - name: 🔄 Fetch CLASS code
+        run: git clone --depth 1 https://github.com/lesgourg/class_public.git class_public
+
+      # Compile CLASS
+      - name: 🔧 Build CLASS
+        working-directory: class_public
+        run: make -j"$(nproc)"
+
+      # Run the high-z redshift scan (Phase A)
+      - name: 🚀 Run Phase A: High-z mPk
+        working-directory: class_public
+        run: |
+          cp "$GITHUB_WORKSPACE/gcft_class_background.dat" .
+          cp "$GITHUB_WORKSPACE/gcft_zlimit_highz.ini" .
+          ./class gcft_zlimit_highz.ini
+          mkdir -p "$GITHUB_WORKSPACE/output/highz"
+          cp -v output/* "$GITHUB_WORKSPACE/output/highz/"
+
+      # Run the CMB (low-z) scan (Phase B)
+      - name: 🚀 Run Phase B: CMB + mPk for z ≤ 1000
+        working-directory: class_public
+        run: |
+          cp "$GITHUB_WORKSPACE/gcft_zlimit_cmb.ini" .
+          ./class gcft_zlimit_cmb.ini
+          mkdir -p "$GITHUB_WORKSPACE/output/cmb"
+          cp -v output/* "$GITHUB_WORKSPACE/output/cmb/"
+
+      # List the output files for verification
+      - name: 📂 List output files
+        run: ls -Rlh output || true
+
+      # Upload the output files to GitHub
+      - name: 📤 Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gcft-redshift-output
+          path: output/
