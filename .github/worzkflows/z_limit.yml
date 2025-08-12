@@ -11,7 +11,7 @@ on:
 jobs:
   run-redshift-scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60  # Increased timeout for experimenting
     env:
       OMP_NUM_THREADS: 1
 
@@ -31,10 +31,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install numpy
+          pip install scipy
 
       # Install system dependencies like build tools and gfortran
       - name: 🛠️ Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential gfortran
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gfortran libopenblas-dev liblapack-dev
 
       # Fetch and compile the CLASS code
       - name: 🔄 Fetch CLASS code
@@ -43,7 +46,17 @@ jobs:
       # Compile CLASS
       - name: 🔧 Build CLASS
         working-directory: class_public
-        run: make -j"$(nproc)"
+        run: |
+          make -j"$(nproc)"
+        continue-on-error: true  # Continue if the build fails to isolate issues
+
+      # Check if CLASS compiled successfully
+      - name: ⚡ Check if CLASS compiled
+        run: |
+          if [ ! -f class_public/class ]; then
+            echo "Error: CLASS was not compiled successfully."
+            exit 1
+          fi
 
       # Run the high-z redshift scan (Phase A)
       - name: 🚀 Run Phase A: High-z mPk
@@ -51,7 +64,7 @@ jobs:
         run: |
           cp "$GITHUB_WORKSPACE/gcft_class_background.dat" .
           cp "$GITHUB_WORKSPACE/gcft_zlimit_highz.ini" .
-          ./class gcft_zlimit_highz.ini
+          ./class gcft_zlimit_highz.ini || { echo "Error running CLASS on high-z."; exit 1; }
           mkdir -p "$GITHUB_WORKSPACE/output/highz"
           cp -v output/* "$GITHUB_WORKSPACE/output/highz/"
 
@@ -60,18 +73,29 @@ jobs:
         working-directory: class_public
         run: |
           cp "$GITHUB_WORKSPACE/gcft_zlimit_cmb.ini" .
-          ./class gcft_zlimit_cmb.ini
+          ./class gcft_zlimit_cmb.ini || { echo "Error running CLASS on CMB."; exit 1; }
           mkdir -p "$GITHUB_WORKSPACE/output/cmb"
           cp -v output/* "$GITHUB_WORKSPACE/output/cmb/"
 
       # List the output files for verification
       - name: 📂 List output files
-        run: ls -Rlh output || true
+        run: |
+          echo "Listing output files in $GITHUB_WORKSPACE/output..."
+          ls -Rlh $GITHUB_WORKSPACE/output || true
+
+      # Verify the outputs using verify_z.py (only if the outputs exist)
+      - name: 🧪 Verify outputs (if files exist)
+        run: |
+          if [ -d "$GITHUB_WORKSPACE/output" ] && [ "$(ls -A $GITHUB_WORKSPACE/output)" ]; then
+            python verify_z.py || { echo "Verification failed."; exit 1; }
+          else
+            echo "No output files found, skipping verification."
+          fi
 
       # Upload the output files to GitHub
       - name: 📤 Upload results
-        if: always()
+        if: always()  # Ensure the upload happens even if previous steps fail
         uses: actions/upload-artifact@v4
         with:
           name: gcft-redshift-output
-          path: output/
+          path: $GITHUB_WORKSPACE/output/
