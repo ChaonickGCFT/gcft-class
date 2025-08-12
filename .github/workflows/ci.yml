@@ -34,11 +34,11 @@ jobs:
       - name: Fetch CLASS
         run: git clone --depth 1 https://github.com/lesgourg/class_public.git class_public
 
-     - name: Copy GCFT config and data
-  run: |
-    cp gcft.ini class_public/gcft.ini
-    cp gcft_class_background.dat class_public/gcft00_background.dat
-    mkdir -p output
+      - name: Copy GCFT config and data
+        run: |
+          cp gcft.ini class_public/gcft.ini
+          cp gcft_class_background.dat class_public/gcft00_background.dat
+          mkdir -p output
 
       - name: Build & run CLASS
         working-directory: class_public
@@ -51,7 +51,6 @@ jobs:
       - name: List outputs
         run: ls -lh output || true
 
-      # Write the verification script to a file so YAML doesn't complain
       - name: Write verify script
         run: |
           cat > verify.py <<'PY'
@@ -81,7 +80,7 @@ jobs:
               return float(np.nanmax(np.abs(a-b)/np.maximum(np.abs(b),1e-12)))
 
           ok=True
-          tol = 5e-6   # allow tiny numerical wiggles
+          tol = 5e-6
 
           for new, ref in pairs:
               pn, pr = P.Path(new), P.Path(ref)
@@ -93,7 +92,6 @@ jobs:
               A, B = load(pn), load(pr)
 
               if new.endswith("_pk.dat"):
-                  # Compare on baseline k-grid
                   kB, PB = B[:,0], B[:,1]
                   kA, PA = A[:,0], A[:,1]
                   kmin, kmax = max(kA.min(), kB.min()), min(kA.max(), kB.max())
@@ -105,15 +103,7 @@ jobs:
                   print(f"[{'OK' if diff<=tol else 'FAIL'}] {new} (interp→baseline) max rel diff={diff:.3e}")
                   if diff>tol: ok=False
 
-              elif new.endswith("_cl.dat"):
-                  if A.shape != B.shape:
-                      print(f"[FAIL] shape {A.shape}!={B.shape} for {new}"); ok=False
-                  else:
-                      diff = max_rel(A, B)
-                      print(f"[{'OK' if diff<=tol else 'FAIL'}] {new} max rel diff={diff:.3e}")
-                      if diff>tol: ok=False
-
-              else:
+              elif new.endswith("_cl.dat") or True:
                   if A.shape != B.shape:
                       print(f"[FAIL] shape {A.shape}!={B.shape} for {new}"); ok=False
                   else:
