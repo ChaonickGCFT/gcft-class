@@ -6,52 +6,55 @@ on:
   workflow_dispatch:
 
 jobs:
-  reproduce:
+  build-and-verify:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
-      - name: Checkout repo
+      - name: 📥 Checkout repo
         uses: actions/checkout@v4
 
-      - name: Init Git LFS (for any .dat tracked via LFS)
+      - name: 🧊 Init Git LFS
         run: |
           git lfs install
           git lfs pull || true
 
-      - name: Setup Python
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: System deps
+      - name: 🛠️ Install system deps
         run: sudo apt-get update && sudo apt-get install -y build-essential gfortran
 
-      - name: Python deps
+      - name: 📦 Install Python deps (if any)
         if: hashFiles('requirements.txt') != ''
         run: pip install -r requirements.txt
 
-      - name: Fetch CLASS
+      - name: 🔄 Fetch CLASS
         run: git clone --depth 1 https://github.com/lesgourg/class_public.git class_public
 
-      - name: Copy GCFT config and data
+      - name: ⚙️ Copy config and baseline
         run: |
           cp gcft.ini class_public/gcft.ini
           cp gcft_class_background.dat class_public/gcft00_background.dat
           mkdir -p output
 
-      - name: Build & run CLASS
+      - name: 🚀 Build & run CLASS
         working-directory: class_public
         run: |
           make -j"$(nproc)"
           ./class gcft.ini
           mkdir -p "$GITHUB_WORKSPACE/output"
-          cp output/*_background.dat output/*_thermodynamics.dat output/*_cl.dat output/*_pk.dat "$GITHUB_WORKSPACE/output/" || true
+          for file in output/*.dat; do
+            name=$(basename "$file")
+            cp "$file" "$GITHUB_WORKSPACE/output/${name/gcft00/gcft01}"
+          done
 
-      - name: List outputs
+      - name: 📂 List outputs
         run: ls -lh output || true
 
-      - name: Write verify script
+      - name: 🧪 Write verify script
         run: |
           cat > verify.py <<'PY'
 import sys, re, numpy as np, pathlib as P
@@ -63,18 +66,16 @@ pairs = [
   ("output/gcft01_thermodynamics.dat", "gcft00_thermodynamics.dat"),
 ]
 
-num = re.compile(r'^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$')
-
 def load(path):
+    num = re.compile(r'^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$')
     rows = []
     for ln in open(path, 'r', errors='ignore'):
         s = ln.strip()
         if not s or s.startswith('#'):
             continue
         toks = [t for t in re.split(r'\s+', s) if num.match(t)]
-        if not toks:
-            continue
-        rows.append([float(t) for t in toks])
+        if toks:
+            rows.append([float(t) for t in toks])
     return np.array(rows, float)
 
 def max_rel(a, b):
@@ -93,35 +94,31 @@ for new, ref in pairs:
     A, B = load(pn), load(pr)
 
     if new.endswith("_pk.dat"):
-        kB, PB = B[:, 0], B[:, 1]
-        kA, PA = A[:, 0], A[:, 1]
+        kA, PA = A[:,0], A[:,1]
+        kB, PB = B[:,0], B[:,1]
         kmin, kmax = max(kA.min(), kB.min()), min(kA.max(), kB.max())
         m = (kB >= kmin) & (kB <= kmax)
         if not np.any(m):
             print(f"[FAIL] no overlapping k-range for {new}"); ok = False; continue
         PAi = np.interp(kB[m], kA, PA)
         diff = max_rel(PAi, PB[m])
-        print(f"[{'OK' if diff <= tol else 'FAIL'}] {new} (interp→baseline) max rel diff={diff:.3e}")
-        if diff > tol: ok = False
-
     else:
         if A.shape != B.shape:
-            print(f"[FAIL] shape {A.shape} != {B.shape} for {new}"); ok = False
-        else:
-            diff = max_rel(A, B)
-            print(f"[{'OK' if diff <= tol else 'FAIL'}] {new} max rel diff={diff:.3e}")
-            if diff > tol: ok = False
+            print(f"[FAIL] shape {A.shape} != {B.shape} for {new}"); ok = False; continue
+        diff = max_rel(A, B)
+
+    print(f"[{'OK' if diff <= tol else 'FAIL'}] {new} max rel diff={diff:.3e}")
+    if diff > tol: ok = False
 
 sys.exit(0 if ok else 1)
-          PY
+PY
 
-      - name: Verify outputs vs baselines
+      - name: ✅ Run verification
         run: python verify.py
 
-      - name: Upload artifacts
+      - name: 📤 Upload outputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gcft-outputs
-          path: |
-            output/gcft01_*.dat
+          name: gcft01-outputs
+          path: output/gcft01_*.dat
