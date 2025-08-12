@@ -1,4 +1,16 @@
-name: GCFT build & verify
+- name: Build & run CLASS
+  working-directory: class_public
+  run: |
+    make -j"$(nproc)"
+
+    echo "🧪 Running CLASS with z_pk='0,25'..."
+    ./class ../gcft.ini z_pk='0,25' root='gcft00' || { echo '❌ CLASS run failed'; exit 1; }
+
+    echo "🔍 Checking for CLASS outputs:"
+    ls -lh gcft00_*.dat || { echo '❌ CLASS output files missing'; exit 1; }
+
+    mkdir -p "$GITHUB_WORKSPACE/output"
+    cp gcft00_*_background.dat gcft00_*_thermodynamics.dat gcft00_*_cl.dat gcft00_*_pk.dat "$GITHUB_WORKSPACE/output/"
 
 on:
   push:
