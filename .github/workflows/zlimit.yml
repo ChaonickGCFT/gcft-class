@@ -50,14 +50,25 @@ jobs:
         working-directory: class_public
         run: |
           make -j"$(nproc)"
-          # 👇 Ensure .ini outputs to gcft00_ prefix!
+          echo "📌 Injecting correct root prefix for output..."
           sed -i 's/^root *=.*/root = output\/gcft00_/g' gcft_zlimit_lowz.ini
-          ./class gcft_zlimit_lowz.ini
+          echo "📈 Running CLASS..."
+          ./class gcft_zlimit_lowz.ini | tee ../class_run.log
+          CLASS_STATUS=${PIPESTATUS[0]}
+          if [ "$CLASS_STATUS" -ne 0 ]; then
+            echo "❌ CLASS execution failed (exit $CLASS_STATUS)"
+            exit $CLASS_STATUS
+          fi
           mkdir -p "$GITHUB_WORKSPACE/output"
           cp output/*_background.dat output/*_thermodynamics.dat output/*_cl.dat output/*_pk.dat "$GITHUB_WORKSPACE/output/" || true
 
       - name: 📂 List output files
-        run: ls -lh output || true
+        run: |
+          echo "🧾 Files in output/:"
+          find output -type f -name "*.dat" -exec ls -lh {} \; || true
+
+      - name: 📜 Show CLASS stdout
+        run: cat class_run.log || true
 
       - name: ✍️ Write verify script
         run: |
