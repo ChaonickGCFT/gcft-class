@@ -35,12 +35,12 @@ jobs:
 
       - name: 🧲 Fetch CLASS code
         run: |
-          if [ ! -d "class_public/.git" ]; then
-            echo "🔁 class_public not found — cloning..."
-            git clone --depth 1 https://github.com/lesgourg/class_public.git class_public
-          else
-            echo "✅ class_public already present, skipping clone"
+          if [ -d "class_public" ]; then
+            echo "🧹 class_public exists — removing it"
+            rm -rf class_public
           fi
+          echo "📥 Cloning fresh class_public..."
+          git clone --depth 1 https://github.com/lesgourg/class_public.git class_public
 
       - name: 📎 Copy GCFT files into CLASS dir
         run: |
@@ -51,7 +51,6 @@ jobs:
         run: |
           make -C class_public -j"$(nproc)"
           ./class_public/class gcft_zlimit_lowz.ini
-
           mkdir -p "$GITHUB_WORKSPACE/output"
           cp output/*_background.dat output/*_thermodynamics.dat output/*_cl.dat output/*_pk.dat "$GITHUB_WORKSPACE/output/" || true
 
