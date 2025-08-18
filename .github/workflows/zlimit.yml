@@ -51,8 +51,10 @@ jobs:
         run: |
           make -C class_public -j"$(nproc)"
           ./class_public/class gcft_zlimit_lowz.ini
+
           mkdir -p "$GITHUB_WORKSPACE/output"
-          cp output/*_background.dat output/*_thermodynamics.dat output/*_cl.dat output/*_pk.dat "$GITHUB_WORKSPACE/output/" || true
+          cp class_public/output/*_background.dat class_public/output/*_thermodynamics.dat class_public/output/*_cl.dat class_public/output/*_pk.dat "$GITHUB_WORKSPACE/output/" || true
+
 
       - name: 📂 List output files
         run: ls -lh output || true
