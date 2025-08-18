@@ -14,7 +14,7 @@ jobs:
       - name: 📥 Checkout repo
         uses: actions/checkout@v4
 
-      - name: 🧱 Init Git LFS (for any .dat tracked via LFS)
+      - name: 🧱 Init Git LFS
         run: |
           git lfs install
           git lfs pull || true
@@ -35,35 +35,30 @@ jobs:
 
       - name: 🧲 Fetch CLASS code
         run: |
-          if [ -d "class_public" ]; then
-            echo "🧹 class_public exists — removing it"
-            rm -rf class_public
-          fi
+          rm -rf class_public
           git clone --depth 1 https://github.com/lesgourg/class_public.git class_public
 
       - name: 📎 Copy GCFT files into CLASS dir
         run: |
           cp gcft_zlimit_lowz.ini gcft_class_background.dat class_public/
-          mkdir -p output
 
       - name: 🔨 Build & run CLASS
         working-directory: class_public
         run: |
           make -j"$(nproc)"
+          # Force root prefix without "output/"
+          sed -i 's/^root *=.*/root = gcft00_/g' gcft_zlimit_lowz.ini
           echo "📈 Running CLASS..."
           ./class gcft_zlimit_lowz.ini | tee ../class_run.log
-          CLASS_STATUS=${PIPESTATUS[0]}
-          if [ "$CLASS_STATUS" -ne 0 ]; then
-            echo "❌ CLASS execution failed (exit $CLASS_STATUS)"
-            exit $CLASS_STATUS
+          STATUS=${PIPESTATUS[0]}
+          if [ "$STATUS" -ne 0 ]; then
+            echo "❌ CLASS failed with exit $STATUS"
+            exit $STATUS
           fi
-          mkdir -p "$GITHUB_WORKSPACE/output"
-          cp output/*_background.dat output/*_thermodynamics.dat output/*_cl.dat output/*_pk.dat "$GITHUB_WORKSPACE/output/" || true
+          cp gcft00_*.dat "$GITHUB_WORKSPACE/" || true
 
       - name: 📂 List output files
-        run: |
-          echo "🧾 Files in output/:"
-          find output -type f -name "*.dat" -exec ls -lh {} \; || true
+        run: ls -lh gcft00_*.dat || true
 
       - name: 📜 Show CLASS stdout
         run: cat class_run.log || true
@@ -71,14 +66,13 @@ jobs:
       - name: ✍️ Write verify script
         run: |
           cat > verify.py <<'PY'
-          import sys, re, numpy as np, pathlib as P, glob
+          import sys, re, numpy as np, pathlib as P
 
-          # Collect all z-dependent pk files
           pairs = [
-            *[(f, f.split("/")[-1]) for f in glob.glob("output/gcft00_z*_pk.dat")],
-            ("output/gcft00_cl.dat","gcft00_cl.dat"),
-            ("output/gcft00_background.dat","gcft00_background.dat"),
-            ("output/gcft00_thermodynamics.dat","gcft00_thermodynamics.dat"),
+            ("gcft00_pk.dat","gcft00_pk.dat"),
+            ("gcft00_cl.dat","gcft00_cl.dat"),
+            ("gcft00_background.dat","gcft00_background.dat"),
+            ("gcft00_thermodynamics.dat","gcft00_thermodynamics.dat"),
           ]
 
           num = re.compile(r'^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$')
@@ -96,19 +90,19 @@ jobs:
               return float(np.nanmax(np.abs(a-b)/np.maximum(np.abs(b),1e-12)))
 
           ok=True
-          tol = 5e-6
+          tol=5e-6
           for new, ref in pairs:
               pn, pr = P.Path(new), P.Path(ref)
               if not pn.exists():
                   print(f"[FAIL] missing {new}"); ok=False; continue
               if not pr.exists():
-                  print(f"[WARN] no baseline {ref} (skipping)"); continue
-              A, B = load(pn), load(pr)
+                  print(f"[WARN] no baseline {ref}"); continue
+              A,B = load(pn), load(pr)
               if A.shape != B.shape:
                   print(f"[FAIL] shape {A.shape}!={B.shape} for {new}"); ok=False
               else:
-                  diff = max_rel(A, B)
-                  print(f"[{'OK' if diff<=tol else 'FAIL'}] {new} max rel diff={diff:.3e}")
+                  diff=max_rel(A,B)
+                  print(f"[{'OK' if diff<=tol else 'FAIL'}] {new} diff={diff:.3e}")
                   if diff>tol: ok=False
           sys.exit(0 if ok else 1)
           PY
@@ -121,4 +115,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gcft-outputs
-          path: output/gcft00_*.dat
+          path: gcft00_*.dat
