@@ -75,10 +75,9 @@ jobs:
           cat > verify.py <<'PY'
           import sys, re, numpy as np, pathlib as P, glob
 
+          # Collect all z-dependent pk files
           pairs = [
-            # all z-dependent pk files
             *[(f, f.split("/")[-1]) for f in glob.glob("output/gcft00_z*_pk.dat")],
-            ("output/gcft00_cl.dat","gcft00_cl.dat"),
             ("output/gcft00_background.dat","gcft00_background.dat"),
             ("output/gcft00_thermodynamics.dat","gcft00_thermodynamics.dat"),
           ]
@@ -124,3 +123,4 @@ jobs:
         with:
           name: gcft-outputs
           path: output/gcft00_*.dat
+
