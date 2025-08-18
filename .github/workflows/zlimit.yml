@@ -50,8 +50,6 @@ jobs:
         working-directory: class_public
         run: |
           make -j"$(nproc)"
-          echo "📌 Injecting correct root prefix for output..."
-          sed -i 's/^root *=.*/root = output\/gcft00_/g' gcft_zlimit_lowz.ini
           echo "📈 Running CLASS..."
           ./class gcft_zlimit_lowz.ini | tee ../class_run.log
           CLASS_STATUS=${PIPESTATUS[0]}
@@ -78,6 +76,7 @@ jobs:
           # Collect all z-dependent pk files
           pairs = [
             *[(f, f.split("/")[-1]) for f in glob.glob("output/gcft00_z*_pk.dat")],
+            ("output/gcft00_cl.dat","gcft00_cl.dat"),
             ("output/gcft00_background.dat","gcft00_background.dat"),
             ("output/gcft00_thermodynamics.dat","gcft00_thermodynamics.dat"),
           ]
@@ -123,4 +122,3 @@ jobs:
         with:
           name: gcft-outputs
           path: output/gcft00_*.dat
-
