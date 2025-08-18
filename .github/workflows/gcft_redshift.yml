@@ -30,19 +30,11 @@ jobs:
       - name: 🛠️ System deps
         run: sudo apt-get update && sudo apt-get install -y build-essential gfortran
 
-      - name: 🔄 Fetch CLASS
-        run: git clone --depth 1 https://github.com/lesgourg/class_public.git class_public
+      - name: ⚙️ Build GCFT-CLASS
+        run: make -j"$(nproc)"
 
-      - name: ⚙️ Copy GCFT config + background
+      - name: 🚀 Run GCFT-CLASS
         run: |
-          cp gcft_redshift_lim.ini class_public/gcft_redshift_lim.ini
-          cp gcft_class_background.dat class_public/gcft_class_background.dat
-          mkdir -p output
-
-      - name: 🚀 Build & run CLASS
-        working-directory: class_public
-        run: |
-          make -j"$(nproc)"
           ./class gcft_redshift_lim.ini
           mkdir -p "$GITHUB_WORKSPACE/output"
           # rename outputs to gcft_zscan_*
@@ -51,16 +43,11 @@ jobs:
             cp "$file" "$GITHUB_WORKSPACE/output/${name/gcft_redshift_lim/gcft_zscan}"
           done
 
-      - name: 📂 Verify outputs before upload
-        run: |
-          echo "Verifying output files..."
-          ls -lh $GITHUB_WORKSPACE/output || true
-
       # ===== Baselines pulled from your first repo =====
       - name: 📥 Checkout baseline repo (first repo)
         uses: actions/checkout@v4
         with:
-          repository: ChaonickGCFT/gcft-class   # <-- change if your "first repo" name differs
+          repository: ChaonickGCFT/gcft-class   # adjust if name differs
           ref: main
           path: baseline_repo
 
@@ -103,15 +90,44 @@ PY
           ls -lh baselines || true
           [ -f gcft00_pk.dat ] && ls -lh gcft00_pk.dat || true
 
-      # ===== Verify =====
+      # ===== Verify GCFT outputs =====
       - name: 🧪 Verify z-scan vs baselines
         run: |
           python -V
           python verify_z.py
 
-      - name: 📤 Upload outputs
+      - name: 📤 Upload GCFT outputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gcft-zscan-outputs
           path: $GITHUB_WORKSPACE/output/
+
+      # ===== Upstream class_public comparison =====
+      - name: 📥 Checkout class_public
+        uses: actions/checkout@v4
+        with:
+          repository: lesgourg/class_public
+          ref: master
+          path: class_public
+
+      - name: ⚙️ Build class_public
+        working-directory: class_public
+        run: make -j"$(nproc)"
+
+      - name: 🚀 Run class_public
+        working-directory: class_public
+        run: |
+          ./class ../gcft_redshift_lim.ini
+          mkdir -p "$GITHUB_WORKSPACE/output_class"
+          for file in output/*.dat; do
+            name=$(basename "$file")
+            cp "$file" "$GITHUB_WORKSPACE/output_class/${name/gcft_redshift_lim/classpub_zscan}"
+          done
+
+      - name: 📤 Upload class_public outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: classpub-zscan-outputs
+          path: $GITHUB_WORKSPACE/output_class/
