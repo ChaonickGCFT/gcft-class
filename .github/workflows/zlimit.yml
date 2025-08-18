@@ -50,6 +50,8 @@ jobs:
         working-directory: class_public
         run: |
           make -j"$(nproc)"
+          # 👇 Ensure .ini outputs to gcft00_ prefix!
+          sed -i 's/^root *=.*/root = output\/gcft00_/g' gcft_zlimit_lowz.ini
           ./class gcft_zlimit_lowz.ini
           mkdir -p "$GITHUB_WORKSPACE/output"
           cp output/*_background.dat output/*_thermodynamics.dat output/*_cl.dat output/*_pk.dat "$GITHUB_WORKSPACE/output/" || true
