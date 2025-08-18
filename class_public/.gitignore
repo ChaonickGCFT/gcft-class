@@ -14,3 +14,9 @@ RealSpaceInterface/cache/
 .DS_Store
 doc/manual/html
 doc/manual/latex
+class_public/build/
+class_public/output/
+class_public/*.a
+class_public/class
+.class_public/.venv/
+output/
